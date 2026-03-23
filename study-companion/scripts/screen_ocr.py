@@ -4,12 +4,18 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+
+def configure_paddle_env() -> None:
+    os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,10 +30,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top", type=int)
     parser.add_argument("--width", type=int)
     parser.add_argument("--height", type=int)
+    parser.add_argument(
+        "--capture-backend",
+        choices=["auto", "mss", "imagegrab", "screencapture"],
+        default="auto",
+        help="screen capture backend",
+    )
+    parser.add_argument(
+        "--save-capture",
+        type=Path,
+        help="optional path to save the captured frame for debugging",
+    )
     return parser
 
 
 def load_ocr(lang: str):
+    configure_paddle_env()
     try:
         from paddleocr import PaddleOCR  # type: ignore
     except Exception as e:  # pragma: no cover
@@ -40,26 +58,21 @@ def load_ocr(lang: str):
         return PaddleOCR(use_angle_cls=True, lang=lang)
 
 
-def capture_image(region: dict[str, int] | None):
-    try:
-        import mss  # type: ignore
-        from PIL import Image  # type: ignore
-    except Exception:
-        mss = None
-        Image = None
+def capture_with_mss(region: dict[str, int] | None):
+    import mss  # type: ignore
+    from PIL import Image  # type: ignore
 
-    if mss and Image:
-        with mss.mss() as sct:
-            monitor = region or sct.monitors[1]
-            shot = sct.grab(monitor)
-            return Image.frombytes("RGB", shot.size, shot.rgb)
+    with mss.mss() as sct:
+        monitors = getattr(sct, "monitors", [])
+        if not (region or len(monitors) > 1):
+            raise RuntimeError("mss did not report any usable monitors")
+        monitor = region or monitors[1]
+        shot = sct.grab(monitor)
+        return Image.frombytes("RGB", shot.size, shot.rgb)
 
-    try:
-        from PIL import ImageGrab  # type: ignore
-    except Exception as e:  # pragma: no cover
-        raise RuntimeError(
-            "Screen capture requires either `mss` + `Pillow` or Pillow ImageGrab support"
-        ) from e
+
+def capture_with_imagegrab(region: dict[str, int] | None):
+    from PIL import ImageGrab  # type: ignore
 
     bbox = None
     if region:
@@ -70,6 +83,62 @@ def capture_image(region: dict[str, int] | None):
             region["top"] + region["height"],
         )
     return ImageGrab.grab(bbox=bbox)
+
+
+def capture_with_screencapture(region: dict[str, int] | None):
+    from PIL import Image  # type: ignore
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+
+    command = ["screencapture", "-x"]
+    if region:
+        rect = f"{region['left']},{region['top']},{region['width']},{region['height']}"
+        command.extend(["-R", rect])
+    command.append(str(tmp_path))
+
+    try:
+        subprocess.run(command, check=True, capture_output=True)
+        return Image.open(tmp_path).copy()
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def capture_image(region: dict[str, int] | None, backend: str):
+    try:
+        import mss  # type: ignore
+    except Exception:
+        mss = None
+    try:
+        from PIL import ImageGrab  # type: ignore
+    except Exception:
+        ImageGrab = None
+
+    methods: list[tuple[str, Any]] = []
+    if backend == "auto":
+        methods = [
+            ("mss", capture_with_mss if mss else None),
+            ("imagegrab", capture_with_imagegrab if ImageGrab else None),
+            ("screencapture", capture_with_screencapture),
+        ]
+    elif backend == "mss":
+        methods = [("mss", capture_with_mss if mss else None)]
+    elif backend == "imagegrab":
+        methods = [("imagegrab", capture_with_imagegrab if ImageGrab else None)]
+    else:
+        methods = [("screencapture", capture_with_screencapture)]
+
+    errors: list[str] = []
+    for name, method in methods:
+        if method is None:
+            errors.append(f"{name}: backend unavailable")
+            continue
+        try:
+            return method(region)
+        except Exception as exc:
+            errors.append(f"{name}: {exc}")
+
+    raise RuntimeError("Screen capture failed: " + " | ".join(errors))
 
 
 def call_ocr(ocr, image_path: Path):
@@ -84,12 +153,6 @@ def extract_lines(result: Any, min_confidence: float) -> list[dict[str, Any]]:
 
     if isinstance(result, list):
         for page in result:
-            if hasattr(page, "json"):
-                try:
-                    page = page.json
-                except Exception:
-                    pass
-
             if isinstance(page, dict):
                 rec_texts = page.get("rec_texts") or []
                 rec_scores = page.get("rec_scores") or []
@@ -99,6 +162,12 @@ def extract_lines(result: Any, min_confidence: float) -> list[dict[str, Any]]:
                     if text and confidence >= min_confidence:
                         lines.append({"text": text, "confidence": confidence})
                 continue
+
+            if hasattr(page, "json"):
+                try:
+                    page = page.json
+                except Exception:
+                    pass
 
             for row in page or []:
                 if not isinstance(row, (list, tuple)) or len(row) < 2:
@@ -146,8 +215,13 @@ def print_payload(payload: dict[str, Any], as_json: bool) -> None:
 
 def main() -> int:
     args = build_parser().parse_args()
+    region_args = (args.left, args.top, args.width, args.height)
     region = None
-    if all(value is not None for value in (args.left, args.top, args.width, args.height)):
+    if any(value is not None for value in region_args) and not all(value is not None for value in region_args):
+        raise SystemExit("Region capture requires --left --top --width --height together")
+    if all(value is not None for value in region_args):
+        if args.width <= 0 or args.height <= 0:
+            raise SystemExit("--width and --height must be positive integers")
         region = {
             "left": args.left,
             "top": args.top,
@@ -159,7 +233,10 @@ def main() -> int:
     last_hash = None
 
     while True:
-        image = capture_image(region)
+        image = capture_image(region, args.capture_backend)
+        if args.save_capture:
+            args.save_capture.parent.mkdir(parents=True, exist_ok=True)
+            image.save(args.save_capture)
         payload = run_ocr(ocr, image, args.min_confidence)
         changed = payload["hash"] != last_hash
         has_text = bool(payload["text"].strip())

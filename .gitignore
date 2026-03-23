@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+memory/last_capture*.png
+memory/last_capture*.json
+memory/snaps/
