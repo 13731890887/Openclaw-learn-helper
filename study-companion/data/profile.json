@@ -1,0 +1,15 @@
+﻿{
+  "learner_name": "",
+  "subjects": [],
+  "preferred_help_style": "hint-first",
+  "sleep_learning": {
+    "enabled": true,
+    "preferred_duration_min": 10,
+    "preferred_tone": "calm"
+  },
+  "push_preferences": {
+    "enabled": true,
+    "morning_time": "08:00",
+    "evening_time": "22:00"
+  }
+}
