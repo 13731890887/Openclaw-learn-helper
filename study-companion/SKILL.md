@@ -85,6 +85,15 @@ Use these files for the MVP state model:
 
 ### scripts/
 - `ocr_parse.py` - PaddleOCR extraction with low-confidence reporting
+- `screen_ocr.py` - live screen capture + OCR loop for on-screen questions
+- `build_sleep_lesson.py` - generate calm, repetition-friendly lesson scripts
+- `review_scheduler.py` - simple spaced-repetition queue manager
+
+### references/
+- `coaching-patterns.md` - hint-first tutoring patterns
+- `sleep-script-patterns.md` - bedtime lesson writing rules
+- `study-ops.md` - how to use the local data files and cron together
+y` - PaddleOCR extraction with low-confidence reporting
 - `build_sleep_lesson.py` - generate calm, repetition-friendly lesson scripts
 - `review_scheduler.py` - simple spaced-repetition queue manager
 
