@@ -18,7 +18,10 @@ def run_ocr(input_path: Path, lang: str = "ch") -> dict[str, Any]:
             "PaddleOCR not installed. Install with: pip install paddleocr paddlepaddle"
         ) from e
 
-    ocr = PaddleOCR(use_angle_cls=True, lang=lang, show_log=False)
+    try:
+        ocr = PaddleOCR(use_textline_orientation=True, lang=lang)
+    except TypeError:
+        ocr = PaddleOCR(use_angle_cls=True, lang=lang)
     result = ocr.ocr(str(input_path), cls=True)
 
     lines: list[dict[str, Any]] = []

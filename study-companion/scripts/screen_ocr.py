@@ -34,7 +34,10 @@ def load_ocr(lang: str):
         raise RuntimeError(
             "PaddleOCR not installed. Install with: pip install paddleocr paddlepaddle"
         ) from e
-    return PaddleOCR(use_angle_cls=True, lang=lang, show_log=False)
+    try:
+        return PaddleOCR(use_textline_orientation=True, lang=lang)
+    except TypeError:
+        return PaddleOCR(use_angle_cls=True, lang=lang)
 
 
 def capture_image(region: dict[str, int] | None):
