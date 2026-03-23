@@ -72,26 +72,55 @@ def capture_image(region: dict[str, int] | None):
     return ImageGrab.grab(bbox=bbox)
 
 
+def call_ocr(ocr, image_path: Path):
+    try:
+        return ocr.ocr(str(image_path), cls=True)
+    except TypeError:
+        return ocr.predict(str(image_path))
+
+
+def extract_lines(result: Any, min_confidence: float) -> list[dict[str, Any]]:
+    lines: list[dict[str, Any]] = []
+
+    if isinstance(result, list):
+        for page in result:
+            if hasattr(page, "json"):
+                try:
+                    page = page.json
+                except Exception:
+                    pass
+
+            if isinstance(page, dict):
+                rec_texts = page.get("rec_texts") or []
+                rec_scores = page.get("rec_scores") or []
+                for text, confidence in zip(rec_texts, rec_scores):
+                    text = str(text).strip()
+                    confidence = float(confidence)
+                    if text and confidence >= min_confidence:
+                        lines.append({"text": text, "confidence": confidence})
+                continue
+
+            for row in page or []:
+                if not isinstance(row, (list, tuple)) or len(row) < 2:
+                    continue
+                text = str(row[1][0]).strip()
+                confidence = float(row[1][1])
+                if text and confidence >= min_confidence:
+                    lines.append({"text": text, "confidence": confidence})
+
+    return lines
+
+
 def run_ocr(ocr, image, min_confidence: float) -> dict[str, Any]:
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
         image.save(tmp_path)
-        result = ocr.ocr(str(tmp_path), cls=True)
+        result = call_ocr(ocr, tmp_path)
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    lines: list[dict[str, Any]] = []
-    for page in result or []:
-        for row in page or []:
-            text = row[1][0].strip()
-            confidence = float(row[1][1])
-            if confidence < min_confidence:
-                continue
-            if not text:
-                continue
-            lines.append({"text": text, "confidence": confidence})
-
+    lines = extract_lines(result, min_confidence)
     full_text = "\n".join(item["text"] for item in lines)
     text_hash = hashlib.sha256(full_text.encode("utf-8")).hexdigest()
     avg_conf = round(sum(i["confidence"] for i in lines) / len(lines), 4) if lines else None

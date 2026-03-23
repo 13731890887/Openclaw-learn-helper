@@ -10,7 +10,7 @@ from typing import Any
 LOW_CONF_THRESHOLD = 0.85
 
 
-def run_ocr(input_path: Path, lang: str = "ch") -> dict[str, Any]:
+def load_ocr(lang: str):
     try:
         from paddleocr import PaddleOCR  # type: ignore
     except Exception as e:  # pragma: no cover - import guard
@@ -19,28 +19,63 @@ def run_ocr(input_path: Path, lang: str = "ch") -> dict[str, Any]:
         ) from e
 
     try:
-        ocr = PaddleOCR(use_textline_orientation=True, lang=lang)
+        return PaddleOCR(use_textline_orientation=True, lang=lang)
     except TypeError:
-        ocr = PaddleOCR(use_angle_cls=True, lang=lang)
-    result = ocr.ocr(str(input_path), cls=True)
+        return PaddleOCR(use_angle_cls=True, lang=lang)
 
+
+def call_ocr(ocr, input_path: Path):
+    try:
+        return ocr.ocr(str(input_path), cls=True)
+    except TypeError:
+        return ocr.predict(str(input_path))
+
+
+def extract_lines(result: Any) -> list[dict[str, Any]]:
     lines: list[dict[str, Any]] = []
-    low_conf_lines: list[dict[str, Any]] = []
 
-    for page_index, page in enumerate(result or []):
-        for row_index, row in enumerate(page or []):
-            text = row[1][0].strip()
-            conf = float(row[1][1])
-            item = {
-                "page": page_index,
-                "row": row_index,
-                "text": text,
-                "confidence": conf,
-            }
-            lines.append(item)
-            if conf < LOW_CONF_THRESHOLD:
-                low_conf_lines.append(item)
+    if isinstance(result, list):
+        for page_index, page in enumerate(result):
+            if hasattr(page, "json"):
+                try:
+                    page = page.json
+                except Exception:
+                    pass
 
+            if isinstance(page, dict):
+                rec_texts = page.get("rec_texts") or []
+                rec_scores = page.get("rec_scores") or []
+                for row_index, (text, conf) in enumerate(zip(rec_texts, rec_scores)):
+                    lines.append(
+                        {
+                            "page": page_index,
+                            "row": row_index,
+                            "text": str(text).strip(),
+                            "confidence": float(conf),
+                        }
+                    )
+                continue
+
+            for row_index, row in enumerate(page or []):
+                if not isinstance(row, (list, tuple)) or len(row) < 2:
+                    continue
+                lines.append(
+                    {
+                        "page": page_index,
+                        "row": row_index,
+                        "text": str(row[1][0]).strip(),
+                        "confidence": float(row[1][1]),
+                    }
+                )
+
+    return lines
+
+
+def run_ocr(input_path: Path, lang: str = "ch") -> dict[str, Any]:
+    ocr = load_ocr(lang)
+    result = call_ocr(ocr, input_path)
+    lines = extract_lines(result)
+    low_conf_lines = [item for item in lines if item["confidence"] < LOW_CONF_THRESHOLD]
     full_text = "\n".join(item["text"] for item in lines if item["text"])
     structured = classify_text(full_text)
 
