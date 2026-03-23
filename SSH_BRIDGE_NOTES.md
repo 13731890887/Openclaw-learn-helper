@@ -59,6 +59,26 @@ Post-fix verification:
 - VPS confirmed listening on `0.0.0.0:42022` and `[::]:42022`
 - User confirmed the bridge recovered and connection worked again
 
+## 2026-03-23 boot auto-start configuration
+
+Goal:
+- Make macOS able to reconnect to Windows after each Windows reboot without requiring an interactive Windows login first
+
+Windows changes made:
+- Kept the existing user logon task `OpenClaw-Windows-Bridge`
+- Added a new startup task `OpenClaw-Windows-Bridge-Boot`
+- New startup task trigger: `AtStartup`
+- New startup task runs as `SYSTEM` with highest privileges
+- Created boot tunnel script at `C:\ProgramData\ssh\openclaw_reverse_tunnel_boot.ps1`
+- Copied the bridge private key to `C:\ProgramData\ssh\openclaw_bridge_key`
+- Restricted the boot key file ACL to `SYSTEM` and `Administrators`
+- Startup script uses system OpenSSH and the known-good target `127.0.0.1:1022`
+- Startup task settings allow running on battery and avoid stopping when power source changes
+
+Result:
+- The Windows bridge can now be started at boot, not only at user logon
+- VPS verification after task creation confirmed port `42022` was listening
+
 Current known-good Windows tunnel command:
 
 ```powershell
