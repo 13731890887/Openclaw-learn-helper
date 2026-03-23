@@ -1,6 +1,8 @@
 # OpenClaw Learn Helper
 
-Agent-oriented study helper for macOS. The current MVP focuses on screenshot-first OCR for learning content, then turns the recognized text into lightweight study analysis.
+[中文说明](./README.zh-CN.md)
+
+Agent-oriented study helper for macOS. The current MVP focuses on screenshot-first OCR for learning content, then turns the recognized text into lightweight study analysis. The current workflow is macOS-first and is not guaranteed to work on Windows.
 
 ## What This Repo Does
 
